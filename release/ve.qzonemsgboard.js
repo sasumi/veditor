@@ -2529,6 +2529,33 @@
 		 */
 		bindEditorDomEvent: function () {
 			var t = this, w = t.getWin(), d = t.getDoc(), b = t.getBody();
+			/**
+			 * 判断选区是否在父级元素的开始或选区开始本身为LI的开始（ie下startContainer会为li），包括以下几种情况
+			 * 1,前面没有兄弟元素
+			 * 2,前面的兄弟元素为不显示元素或空文本
+			 */
+			var isStartInParent = function(range){
+				var tmpRange = range.cloneRange(),
+					start = tmpRange.startContainer,
+					tmp;
+				if(tmpRange.startOffset == 0){
+					if(!tmpRange.startContainer.previousSibling ||tmpRange.startContainer.tagName == "LI"){
+						return true;
+					}else{
+						tmp = tmpRange.startContainer.previousSibling;
+						while(tmp){
+							if(!tmp.firstChild || ve.dom.getChildCount(tmp) == 0){
+								tmp = tmp.previousSibling;
+							}else{
+								return false;
+							}
+						}
+						return true;
+					}
+				}else{
+					return false;
+				}
+			};
 
 			//批量添加鼠标、键盘事件
 			ve.lang.each(['Click', 'KeyPress', 'KeyDown', 'KeyUp', 'MouseDown', 'MouseUp', 'Select', 'Paste'], function(_ev){
@@ -2629,6 +2656,35 @@
 									ve.dom.event.preventDefault(e);
 								}
 							}
+							
+							/**fix IE下删除列表除第一个LI外其他LI，跳出列表的问题
+							 * <ol>
+							 *	<li>aaaa</li>
+							 *	<li>|bbbb</li>
+							 * </ol>
+							 * bbbb会跳出ol的问题
+							 */
+							if(isStartInParent(rng)){ //选区开始在某列表内且前面没有显示的兄弟元素
+								if (rng.startContainer.parentNode.tagName == 'UL' || rng.startContainer.parentNode.tagName == 'OL' || rng.startContainer.parentNode.tagName == 'LI') { //当前选取在列表内
+									try{
+										currentLI = ve.dom.getParent(rng.startContainer, function(node){return node.tagName == 'LI';});
+									}catch (ev){
+										currentLI = '';
+									}
+									//console.log(currentLI.innerHTML);
+									if(currentLI && currentLI.previousSibling && currentLI.previousSibling.tagName == 'LI'){ //非列表内第一个li	
+										rng.startContainer = currentLI.previousSibling;
+										rng.startOffset = currentLI.previousSibling.childNodes.length;
+										rng.collapse(true);
+										rng.select();
+										while(currentLI.firstChild){
+											currentLI.previousSibling.appendChild(currentLI.firstChild);
+										}
+										ve.dom.remove(currentLI);
+										ve.dom.event.preventDefault(e);
+									}
+								}
+							}
 						}
 					}
 
@@ -2691,6 +2747,53 @@
 							rng.collapse(true);
 							rng.select();
 							ve.dom.event.preventDefault(e);
+						}
+					}
+					/**
+					 * fix chrome,firefox等浏览器无法删除列表第一个元素的情况
+					 * <ol>
+					 * 	  <li>|ddd</li>
+					 * </ol>
+					 * 广标后面有ddd等其他内容即使是个空格，无法删除该LI的情况
+					 */
+					else if(e.keyCode == 8){ //其他浏览器中列表首个删除fix
+						var rng = t.getVERange();
+						var currentLI,tempParent;
+						if(!rng.collapsed){ //选中某段文字的情况，暂用浏览器默认方法
+							return;
+						}else{ //鼠标在列表内未选择任何文字的情况
+							if(isStartInParent(rng)){ //鼠标在父节点内且前面没有显示的兄弟元素
+								if (rng.startContainer.parentNode && (rng.startContainer.parentNode.tagName == 'UL' || rng.startContainer.parentNode.tagName == 'OL' || rng.startContainer.parentNode.tagName == 'LI')) { //当前选取在列表内
+									try{
+										currentLI = ve.dom.getParent(rng.startContainer, function(node){return node.tagName == 'LI';});
+									}catch (ev){
+										currentLI = '';
+									}
+									if(currentLI && currentLI.parentNode && currentLI.parentNode.parentNode && currentLI.parentNode.firstChild == currentLI){ //当前为列表的第一个li
+										while(currentLI.firstChild){
+											currentLI.parentNode.parentNode.insertBefore(ve.dom.remove(currentLI.firstChild), currentLI.parentNode);
+										}
+										rng.select(true);
+										if(currentLI && (tempParent = currentLI.parentNode)){
+											ve.dom.remove(currentLI);
+											if(!tempParent.firstChild){
+												ve.dom.remove(tempParent);
+											}
+										}
+									}
+									else if(currentLI && currentLI.previousSibling.tagName == 'LI'){ //非列表内第一个li
+										rng.startContainer = currentLI.previousSibling;
+										rng.startOffset = currentLI.previousSibling.childNodes.length;
+										rng.collapse(true);
+										rng.select();
+										while(currentLI.firstChild){
+											currentLI.previousSibling.appendChild(currentLI.firstChild);
+										}
+										ve.dom.remove(currentLI);
+										ve.dom.event.preventDefault(e);
+									}
+								}
+							}
 						}
 					}
 				});
@@ -6879,6 +6982,14 @@
 					}
 				}
 			});
+			this.editor.onClick.add(function(e){
+				var rng = _this.editor.getVERange();
+				if((rng.startContainer.tagName == 'UL' || rng.startContainer.tagName == 'OL')){
+					rng.startContainer = rng.startContainer.lastChild;
+					rng.startOffset = 0;
+					rng.collapse(true);
+				}
+			});
 		},
 
 		/**
@@ -6889,6 +7000,7 @@
 		_handerEnter: function(){
 			var rng = this.editor.getVERange();
 			var sc, start, cursorPos;
+			var tempSpan = rng.doc.createElement('span');
 
 			if(!this._inList(rng)){
 				return;
@@ -6901,90 +7013,60 @@
 
 			var liNode = this.editor.getDoc().createElement('LI');
 			var con = this._inList(rng);
-
 			if(!con){
 				console.log('处理失败');
 				return;
 			}
 
-			var cursorPos = this.getCursorPos(con, rng);
-			if(cursorPos == POS_LEFT){
-				ve.dom.insertBefore(liNode, con);
-			} else if(cursorPos == POS_RIGHT){
-				ve.dom.insertAfter(liNode, con);
-				rng.selectNodeContents(liNode);
-				rng.select();
-			} else {
-				var bookmark = rng.createBookmark();
-				var tmpRng = rng.cloneRange();
-				tmpRng.setStartAfter(bookmark.start);
-				tmpRng.setEndAfter(con.childNodes[con.childNodes.length-1]);
-				var frag = tmpRng.extractContents();
-				liNode.appendChild(frag);
-				ve.dom.insertAfter(liNode, con);
-				rng.setStartBefore(liNode.firstChild);
-				rng.collapse(true);
-				rng.select();
-			}
-			return true;
-		},
-
-		/**
-		 * 获取当前start在con里面的位置情况
-		 * @param {DOM} con
-		 * @param {Range} rng
-		 * @return {Number}
-		 **/
-		getCursorPos: function(con, rng){
 			var bookmark = rng.createBookmark();
-			var s = bookmark.start;
-			var p = s;
-			var pos = POS_MID;
-
-			if(rng.startOffset >0 && rng.startContainer.childNodes.length > rng.startOffset){
-				return POS_MID;
+			var tmpRng = rng.cloneRange();
+			tmpRng.setStartAfter(bookmark.start);
+			if(con.childNodes.length > 0){
+				tmpRng.setEndAfter(con.childNodes[con.childNodes.length-1]);
+			}else{
+				tmpRng.setEndAfter(bookmark.start);
 			}
-
-			var p = s;
-			while(p !== con){
-				if(!p.previousSibling){
-					pos = POS_LEFT;
-					break;
-				} else if(!p.nextSibling){
-					pos = POS_RIGHT;
-					break;
-				} else {
-					p = p.parentNode;
-				}
+			var frag = tmpRng.extractContents();
+			if(this.isEmptyNode(frag) || this.isTagNode(frag,'li') || !frag.lastChild.innerHTML){
+				tempSpan.innerHTML = '&nbsp;';
+				frag.appendChild(tempSpan);
 			}
-			rng.moveToBookmark(bookmark);
-			return pos;
+			liNode.appendChild(frag);
+			if(this.isEmptyNode(con) || (this.isEmptyNode(con.lastChild) && this.isTagNode(con.lastChild,'span')) || !con.lastChild.innerHTML){
+				tempSpan.innerHTML = '&nbsp;';
+				con.appendChild(tempSpan);
+			}
+			ve.dom.insertAfter(liNode, con);
+			if(liNode.firstChild){
+				rng.setStartBefore(liNode.firstChild);
+			}else{
+				rng.setStartBefore(liNode);
+			}
+			rng.collapse(true);
+			rng.select();
+			return true;
 		},
 
 		/**
 		 * 检测range包含list
 		 **/
 		_inList: function(rng){
-			var start, end, _start, _end, sc = rng.startContainer,ec = rng.endContainer;
-
-			_start = sc.nodeType == 3 ? sc.parentNode : sc.childNodes[0];
-			_end = ec.nodeType == 3 ? ec.parentNode : ec.childNodes[ec.childNodes.length-1];
-
+			var start, end, sc = rng.startContainer,ec = rng.endContainer;
 			if(rng.collapsed){
-				start = ve.dom.getParent(_start, function(node){return node.tagName == 'LI';});
+				start = this.findParentByTagName(sc, 'li', true);
 			} else {
-				end = ve.dom.getParent(_end, function(node){return node.tagName == 'LI';});
+				end = this.findParentByTagName(ec, 'li', true);
 			}
 			return start || end;
 		},
 		
 		/**
-		 * insertList插入列表逻辑
+		 * insertOrDelList插入列表逻辑
 		 * @param command string 区分有序还是无序列表
 		 * @param style 待扩展功能，设置列表样式
 		 *
 		 **/
-		insertList: function(command, style){
+		insertOrDelList: function(command, style){
 			if (!style) {
 				style = command.toLowerCase() == 'insertorderedlist' ? 'decimal' : 'disc';
 			}
@@ -7061,13 +7143,16 @@
 				if (startParent === endParent) {
 					while (start !== end) {
 						tmp = start;
-						start = start.nextSibling;
+						start = start.nextSibling || null;
 						
 						if (!ve.dom.isBlock(tmp.firstChild) && tmp.lastChild && tmp.lastChild.nodeName.toLowerCase() !== 'br') {
 
 							tmp.appendChild(veRange.doc.createElement('br')); //为li下的非块元素添加换行
 						}
 						frag.appendChild(tmp);
+						if(!start){
+							break;
+						}
 					}
 					
 					tmp = veRange.doc.createElement('span');
@@ -7082,21 +7167,17 @@
 					veRange.breakParent(tmp, startParent);
 					
 					if (this.isEmptyNode(tmp.previousSibling)) {
-					
 						ve.dom.remove(tmp.previousSibling);
 					}
 					if (this.isEmptyNode(tmp.nextSibling)) {
-					
 						ve.dom.remove(tmp.nextSibling)
 					}
 					
-					var nodeStyle = ve.dom.getStyle(startParent, 'list-style-type') || this.getComputedStyle(startParent, 'list-style-type') || (command.toLowerCase() == 'insertorderedlist' ? 'decimal' : 'disc');
+					var nodeStyle = ve.dom.getStyle(startParent, 'list-style-type') || (command.toLowerCase() == 'insertorderedlist' ? 'decimal' : 'disc');
 					
 					if (startParent.tagName.toLowerCase() == tag && nodeStyle == style) {
-					
 						for (var i = 0, ci, tmpFrag = veRange.doc.createDocumentFragment(); ci = frag.childNodes[i++];) {
 							if(this.isTagNode(ci,'ol ul')){
-							
 								ve.lang.each(ci.getElementsByTagName('li'),function(li){
 									while(li.firstChild){
 										tmpFrag.appendChild(li.firstChild);
@@ -7108,7 +7189,6 @@
 								}
 							}
 						}
-						
 						tmp.parentNode.insertBefore(tmpFrag, tmp);
 						
 					} else {
@@ -7145,7 +7225,6 @@
 							}
 							ve.dom.remove(start);
 						}
-
 						start = tmp;
 					}
 					startParent.parentNode.insertBefore(frag, startParent.nextSibling);
@@ -7193,7 +7272,6 @@
 					if (this.isEmptyNode(endParent)) {
 						ve.dom.remove(endParent);
 					}
-
 					modifyEnd = 1;
 				}
 			}
@@ -7219,12 +7297,9 @@
 
 				if (current.nodeType == 3 || ve.dtd.li[current.tagName]) {
 					if (current.nodeType == 1 && ve.dtd.$list[current.tagName]) {
-					
 						while (current.firstChild) {
-						
 							frag.appendChild(current.firstChild);
 						}
-						
 						tmpNode = ve.dom.getNextDomNode(current, false, filterFn);
 						ve.dom.remove(current);
 						current = tmpNode;
@@ -7235,7 +7310,6 @@
 					tmpRange.setStartBefore(current);
 
 					while (current && current !== bk.end && (!ve.dom.isBlock(current) || veRange.isBookmarkNode(current) )) {
-					
 						tmpNode = current;
 						current = ve.dom.getNextDomNode(current, false, null, function (node) {
 							return !notExchange[node.tagName];
@@ -7264,6 +7338,13 @@
 			veRange.moveToBookmark(bk).collapse(true);
 			list = veRange.doc.createElement(tag);
 			list.style['list-style-type'] = style;
+			if(frag.childNodes.length == 0){
+				tmpNode = veRange.doc.createElement('span');
+				tmpNode.innerHTML = '&nbsp;';
+				var tmpLi = veRange.doc.createElement('li');
+				tmpLi.appendChild(tmpNode);
+				frag.appendChild(tmpLi);
+			}
 			list.appendChild(frag);
 			
 			veRange.insertNode(veRange.doc.createElement('br'));//放置一个换行，输入列表外内容
@@ -7453,15 +7534,7 @@
 		isTagNode: function (node, tagName) {
 			return node.nodeType == 1 && new RegExp(node.tagName,'i').test(tagName)
 		},
-		
-		/**
-		 * 获取计算后样式
-		 */
-		getComputedStyle: function (){
-		
-			return '';
-		},
-		
+
 		/**
 		 * 判断节点是否为空节点
 		 */
@@ -7539,20 +7612,20 @@
 			}});
 			
 			t.addCommand('InsertOrderedList', function(){
-				_this.insertList('InsertOrderedList');
+				_this.insertOrDelList('InsertOrderedList');
 			});
 			
 			tm.createButton('listul', {title: '无序列表', 'class': 'veUnorderedList', cmd: 'InsertUnorderedList', onInit: function(){
 				var btn = this;
 				t.onAfterUpdateVERangeLazy.add(function(){
 					var act = 'setUnActive';
-					try {act = t.getDoc().queryCommandState('veUnorderedList') ? 'setActive' : 'setUnActive';} catch(ex){};
+					try {act = t.getDoc().queryCommandState('InsertUnorderedList') ? 'setActive' : 'setUnActive';} catch(ex){};
 					btn[act]();
 				});
 			}});
 			
 			t.addCommand('InsertUnorderedList', function(){
-				_this.insertList('InsertUnorderedList');
+				_this.insertOrDelList('InsertUnorderedList');
 			});
 
 		}
@@ -9227,6 +9300,10 @@
 	};
 }) (VEditor);
 (function(ve) {
+	//匹配要移除的标记
+	var REMOVE_TAG_REG = /^(?:B|BIG|CODE|DEL|DFN|EM|FONT|I|INS|KBD|Q|SAMP|SMALL|SPAN|STRIKE|STRONG|SUB|SUP|TT|U|VAR)$/i;
+	//要移除的属性样式
+	var REMOVE_FORMAT_ATTRIBUTES = ["class", "style", "lang", "width", "height", "align", "hspace", "valign"];
 	/**
 	 * 移除格式
 	 */
@@ -9234,17 +9311,6 @@
 		editor : null,
 		curToolbarMode : 'default',
 		button : null,
-		fillChar : ve.caretChar,
-		//块元素
-		block : ve.dtd.$block,
-		//没有子元素可以删除的元素
-		removeEmpty : ve.dtd.$removeEmpty,
-		//子元素为空
-		empty : ve.dtd.$empty,
-		//在table元素里的元素列表
-		tableContent : ve.dtd.$tableContent,
-		//列表根元素列表
-		list : ve.dtd.$list,
 		init: function ( editor, url ) {
 
 			var _this = this;
@@ -9261,60 +9327,44 @@
 		},
 		//执行去格式主函数
 		removeFormat : function(){
-			var filter = function( node ) {
-				return node.nodeType == 1;
-			};
 			var bookmark, node, parent;
-			var tagReg = /^(?:B|BIG|CODE|DEL|DFN|EM|FONT|I|INS|KBD|Q|SAMP|SMALL|SPAN|STRIKE|STRONG|SUB|SUP|TT|U|VAR)$/i;
-			var removeFormatAttributes = ["class", "style", "lang", "width", "height", "align", "hspace", "valign"];
-
 			var veRange = this.editor.getVERange();
 			bookmark = veRange.createBookmark();
 			node = bookmark.start;
 			
 			//切开始部分
 			while(( parent = node.parentNode ) && !ve.dom.isBlock( parent )){
-			
 				veRange.breakParent( node,parent );
-				this.clearEmptySibling( node );
+				clearEmptySibling( node );
 			}
 			
 			if( bookmark.end ){
-				
 				//切结束部分
 				node = bookmark.end;
 				
 				while(( parent = node.parentNode ) && !ve.dom.isBlock( parent )){
-				
 					veRange.breakParent( node, parent );
-					this.clearEmptySibling( node );
+					clearEmptySibling( node );
 				}
 
 				//开始去除样式
 				var current = ve.dom.getNextDomNode( bookmark.start, false, filter ),
 					next;
 				while ( current ) {
-				
 					if ( current == bookmark.end ) {
-					
 						break;
 					}
-
 					next = ve.dom.getNextDomNode( current, true, filter );
-
-					if ( !this.empty[current.tagName.toUpperCase()] && !veRange.isBookmarkNode( current ) ) {
-					
-						if ( tagReg.test( current.tagName.toUpperCase() ) ) {
-						
+					if ( !ve.dtd.$empty[current.tagName.toUpperCase()] && !veRange.isBookmarkNode( current ) ) {
+						if ( REMOVE_TAG_REG.test( current.tagName.toUpperCase() ) ) {
 							ve.dom.remove( current, true );
 						} else {
-
 							//不能把list上的样式去掉
-							if(!this.tableContent[current.tagName.toUpperCase()] && !this.list[current.tagName.toUpperCase()]){
-								this.removeAttributes( current, removeFormatAttributes );
-								if ( this.isRedundantSpan( current ) ){
-									ve.dom.remove( current, true );
-								}
+							if(!ve.dtd.$tableContent[current.tagName.toUpperCase()] && !ve.dtd.$list[current.tagName.toUpperCase()]){
+								removeAttributes( current, REMOVE_FORMAT_ATTRIBUTES );
+							}
+							if ( isRedundantSpan( current ) ){
+								ve.dom.remove( current, true );
 							}
 						}
 					}
@@ -9323,27 +9373,23 @@
 			}
 			var pN = bookmark.start.parentNode;
 			
-			if( ve.dom.isBlock(pN) && !this.tableContent[pN.tagName.toUpperCase()] && !this.list[pN.tagName.toUpperCase()] ){
-
-				this.removeAttributes(  pN,removeFormatAttributes );
+			if( ve.dom.isBlock(pN) && !ve.dtd.$tableContent[pN.tagName.toUpperCase()] && !ve.dtd.$list[pN.tagName.toUpperCase()] ){
+				removeAttributes(  pN,REMOVE_FORMAT_ATTRIBUTES );
 			}
 
-			if( bookmark.end && ve.dom.isBlock( pN = bookmark.end.parentNode ) && !this.tableContent[pN.tagName.toUpperCase()] && !this.list[pN.tagName.toUpperCase()] ){
-			
-				this.removeAttributes(  pN,removeFormatAttributes );
+			if( bookmark.end && ve.dom.isBlock( pN = bookmark.end.parentNode ) && !ve.dtd.$tableContent[pN.tagName.toUpperCase()] && !ve.dtd.$list[pN.tagName.toUpperCase()] ){
+				removeAttributes(  pN,REMOVE_FORMAT_ATTRIBUTES );
 			}
-			veRange.moveToBookmark( bookmark );//.moveToBookmark(bookmark1);
+			veRange.moveToBookmark( bookmark );
 			//清除冗余的代码 <b><bookmark></b>
 			var node = veRange.startContainer,
 				tmp,
 				collapsed = veRange.collapsed;
-			while( node.nodeType == 1  && this.removeEmpty[node.tagName.toUpperCase()] ){
-			
+			while( node.nodeType == 1  && ve.dtd.$removeEmpty[node.tagName.toUpperCase()] ){
 				tmp = node.parentNode;
 				veRange.setStartBefore(node);
 				//更新结束边界
 				if( veRange.startContainer === veRange.endContainer ){
-				
 					veRange.endOffset--;
 				}
 				ve.dom.remove(node);
@@ -9351,10 +9397,8 @@
 			}
 
 			if( !collapsed ){
-
 				node = veRange.endContainer;
-				while( node.nodeType == 1  && this.removeEmpty[node.tagName.toUpperCase()] ){
-				
+				while( node.nodeType == 1  && ve.dtd.$removeEmpty[node.tagName.toUpperCase()] ){
 					tmp = node.parentNode;
 					veRange.setEndBefore(node);
 					ve.dom.remove(node);
@@ -9362,165 +9406,151 @@
 				}
 			}
 			veRange.select();
-		},
-		/**
-		 * 清除node节点左右兄弟为空的inline节点
-		 * @name clearEmptySibling
-		 * @grammar this.clearEmptySibling(node)
-		 * @grammar this.clearEmptySibling(node,ignoreNext)  //ignoreNext指定是否忽略右边空节点
-		 * @grammar this.clearEmptySibling(node,ignoreNext,ignorePre)  //ignorePre指定是否忽略左边空节点
-		 * @example
-		 * <b></b><i></i>xxxx<b>bb</b> --> xxxx<b>bb</b>
-		 */
-		clearEmptySibling : function (node, ignoreNext, ignorePre) {
-			var _this = this;
-			function clear(next, dir) {
-				var tmpNode;
-				while (next && !_this.isBookmarkNode(next) && (_this.isEmptyInlineElement(next)
-					//这里不能把空格算进来会吧空格干掉，出现文字间的空格丢掉了
-					|| !new RegExp('[^\t\n\r' + _this.fillChar + ']').test(next.nodeValue) )) {
-					tmpNode = next[dir];
-					ve.dom.remove(next);
-					next = tmpNode;
-				}
-			}
-			!ignoreNext && clear(node.nextSibling, 'nextSibling');
-			!ignorePre && clear(node.previousSibling, 'previousSibling');
-		},
-		/**
-		 * 删除节点node上的属性attrNames，attrNames为属性名称数组
-		 * @name  removeAttributes
-		 * @grammar this.removeAttributes(node,attrNames)
-		 * @example
-		 * //Before remove
-		 * <span style="font-size:14px;" id="test" name="followMe">xxxxx</span>
-		 * //Remove
-		 * this.removeAttributes(node,["id","name"]);
-		 * //After remove
-		 * <span style="font-size:14px;">xxxxx</span>
-		 */
-		removeAttributes : function ( node, attrNames ) {
-			var attrFix = ve.ua.ie && ve.ua.ie < 9 ? {
-					tabindex:"tabIndex",
-					readonly:"readOnly",
-					"for":"htmlFor",
-					"class":"className",
-					maxlength:"maxLength",
-					cellspacing:"cellSpacing",
-					cellpadding:"cellPadding",
-					rowspan:"rowSpan",
-					colspan:"colSpan",
-					usemap:"useMap",
-					frameborder:"frameBorder"
-				} : {
-					tabindex:"tabIndex",
-					readonly:"readOnly"
-				},
-			attrNames = ve.lang.isArray( attrNames ) ? attrNames : ve.string.trim( attrNames ).replace(/[ ]{2,}/g,' ').split(' ');
-			for (var i = 0, ci; ci = attrNames[i++];) {
-			
-				ci = attrFix[ci] || ci;
-				switch (ci) {
-					case 'className':
-						node[ci] = '';
-						break;
-					case 'style':
-						node.style.cssText = '';
-						!ve.ua.ie && node.removeAttributeNode(node.getAttributeNode('style'))
-				}
-				node.removeAttribute(ci);
-			}
-		},
-		/**
-		 * 将css样式转换为驼峰的形式。如font-size => fontSize
-		 * @name cssStyleToDomStyle
-		 * @grammar UE.utils.cssStyleToDomStyle(cssName)  => String
-		 */
-		cssStyleToDomStyle : function () {
-
-			var test = document.createElement('div').style,
-				cache = {
-					'float':test.cssFloat != undefined ? 'cssFloat' : test.styleFloat != undefined ? 'styleFloat' : 'float'
-				};
-
-			return function (cssName) {
-				return cache[cssName] || (cache[cssName] = cssName.toUpperCase().replace(/-./g, function (match) {
-					return match.charAt(1).toUpperCase();
-				}));
-			};
-		}(),
-		/**
-		 * 检查节点node是否是空inline节点
-		 * @name  isEmptyInlineElement
-		 * @grammar   this.isEmptyInlineElement(node)  => 1|0
-		 * @example
-		 * <b><i></i></b> => 1
-		 * <b><i></i><u></u></b> => 1
-		 * <b></b> => 1
-		 * <b>xx<i></i></b> => 0
-		 */
-		isEmptyInlineElement : function ( node ) {
-			if (node.nodeType != 1 || this.removeEmpty[ node.tagName.toUpperCase() ]) {
-				return 0;
-			}
-			node = node.firstChild;
-			while (node) {
-				//如果是创建的bookmark就跳过
-				if (this.isBookmarkNode(node)) {
-					return 0;
-				}
-				if (node.nodeType == 1 && !this.isEmptyInlineElement(node) ||
-					node.nodeType == 3 && !this.isWhitespace(node)
-					) {
-					return 0;
-				}
-				node = node.nextSibling;
-			}
-			return 1;
-		},
-		/**
-		 * 检测节点node是否为空节点（包括空格、换行、占位符等字符）
-		 * @name  isWhitespace
-		 * @grammar  this.isWhitespace(node)  => true|false
-		 */
-		isWhitespace : function ( node ) {
-			return !new RegExp('[^ \t\n\r' + this.fillChar + ']').test(node.nodeValue);
-		},
-		/**
-		 * 检测节点node是否属于bookmark节点
-		 * @name isBookmarkNode
-		 * @grammar this.isBookmarkNode(node)  => true|false
-		 */
-		isBookmarkNode : function ( node ) {
-			return node.nodeType == 1 && node.id && /^veditor_bookmark_/i.test(node.id);
-		},
-		/**
-		 * 判断node是否为多余的节点
-		 * @name isRenundantSpan
- 		 */
-		isRedundantSpan : function( node ) {
-			if (node.nodeType == 3 || node.tagName.toUpperCase() != 'SPAN'){
-			
-				return 0;
-			}
-			if (ve.ua.ie) {
-			
-				//ie 下判断实效，所以只能简单用style来判断
-				//return node.style.cssText == '' ? 1 : 0;
-				var attrs = node.attributes;
-				if ( attrs.length ) {
-					for ( var i = 0,l = attrs.length; i<l; i++ ) {
-						if ( attrs[i].specified ) {
-							return 0;
-						}
-					}
-					return 1;
-				}
-			}
-			return !node.attributes.length;
 		}
 	});
 	ve.plugin.register('removeformat', VEditor.plugin.RemoveFormat);
+
+	/**
+	 * 过滤元素节点
+	 */
+	var filter = function( node ) {
+		return node.nodeType == 1;
+	};
+	/**
+	 * 清除node节点左右兄弟为空的inline节点
+	 * @name clearEmptySibling
+	 * @grammar clearEmptySibling(node)
+	 * @grammar clearEmptySibling(node,ignoreNext)  //ignoreNext指定是否忽略右边空节点
+	 * @grammar clearEmptySibling(node,ignoreNext,ignorePre)  //ignorePre指定是否忽略左边空节点
+	 * @example
+	 * <b></b><i></i>xxxx<b>bb</b> --> xxxx<b>bb</b>
+	 */
+	var	clearEmptySibling = function (node, ignoreNext, ignorePre) {
+		function clear(next, dir) {
+			var tmpNode;
+			while (next && !isBookmarkNode(next) && (isEmptyInlineElement(next)
+				//这里不能把空格算进来会吧空格干掉，出现文字间的空格丢掉了
+				|| !new RegExp('[^\t\n\r' + ve.caretChar + ']').test(next.nodeValue) )) {
+				tmpNode = next[dir];
+				ve.dom.remove(next);
+				next = tmpNode;
+			}
+		}
+		!ignoreNext && clear(node.nextSibling, 'nextSibling');
+		!ignorePre && clear(node.previousSibling, 'previousSibling');
+	};
+	/**
+	 * 删除节点node上的属性attrNames，attrNames为属性名称数组
+	 * @name  removeAttributes
+	 * @grammar removeAttributes(node,attrNames)
+	 * @example
+	 * //Before remove
+	 * <span style="font-size:14px;" id="test" name="followMe">xxxxx</span>
+	 * //Remove
+	 * removeAttributes(node,["id","name"]);
+	 * //After remove
+	 * <span style="font-size:14px;">xxxxx</span>
+	 */
+	var	removeAttributes = function ( node, attrNames ) {
+		//需要修正属性名的属性
+		var attrFix = ve.ua.ie && ve.ua.ie < 9 ? {
+				tabindex:"tabIndex",
+				readonly:"readOnly",
+				"for":"htmlFor",
+				"class":"className",
+				maxlength:"maxLength",
+				cellspacing:"cellSpacing",
+				cellpadding:"cellPadding",
+				rowspan:"rowSpan",
+				colspan:"colSpan",
+				usemap:"useMap",
+				frameborder:"frameBorder"
+			} : {
+				tabindex:"tabIndex",
+				readonly:"readOnly"
+			},
+		attrNames = ve.lang.isArray( attrNames ) ? attrNames : ve.string.trim( attrNames ).replace(/[ ]{2,}/g,' ').split(' ');
+		for (var i = 0, ci; ci = attrNames[i++];) {
+			ci = attrFix[ci] || ci;
+			switch (ci) {
+				case 'className':
+					node[ci] = '';
+					break;
+				case 'style':
+					node.style.cssText = '';
+					!ve.ua.ie && node.removeAttributeNode(node.getAttributeNode('style'))
+			}
+			node.removeAttribute(ci);
+		}
+	};
+	/**
+	 * 检查节点node是否是空inline节点
+	 * @name  isEmptyInlineElement
+	 * @grammar   isEmptyInlineElement(node)  => 1|0
+	 * @example
+	 * <b><i></i></b> => 1
+	 * <b><i></i><u></u></b> => 1
+	 * <b></b> => 1
+	 * <b>xx<i></i></b> => 0
+	 */
+	var	isEmptyInlineElement = function ( node ) {
+		if (node.nodeType != 1 || ve.dtd.$removeEmpty[ node.tagName.toUpperCase() ]) {
+			return 0;
+		}
+		node = node.firstChild;
+		while (node) {
+			//如果是创建的bookmark就跳过
+			if (isBookmarkNode(node)) {
+				return 0;
+			}
+			if (node.nodeType == 1 && !isEmptyInlineElement(node) ||
+				node.nodeType == 3 && !isWhitespace(node)
+				) {
+				return 0;
+			}
+			node = node.nextSibling;
+		}
+		return 1;
+	};
+	/**
+	 * 检测节点node是否为空节点（包括空格、换行、占位符等字符）
+	 * @name  isWhitespace
+	 * @grammar  isWhitespace(node)  => true|false
+	 */
+	var	isWhitespace = function ( node ) {
+		return !new RegExp('[^ \t\n\r' + ve.caretChar + ']').test(node.nodeValue);
+	};
+	/**
+	 * 检测节点node是否属于bookmark节点
+	 * @name isBookmarkNode
+	 * @grammar isBookmarkNode(node)  => true|false
+	 */
+	var	isBookmarkNode = function ( node ) {
+		return node.nodeType == 1 && node.id && /^veditor_bookmark_/i.test(node.id);
+	};
+	/**
+	 * 判断node是否为多余的节点
+	 * @name isRenundantSpan
+	 */
+	var	isRedundantSpan = function( node ) {
+		if (node.nodeType == 3 || node.tagName.toUpperCase() != 'SPAN'){
+			return 0;
+		}
+		if (ve.ua.ie) {
+			//ie 下判断实效，所以只能简单用style来判断
+			//return node.style.cssText == '' ? 1 : 0;
+			var attrs = node.attributes;
+			if ( attrs.length ) {
+				for ( var i = 0,l = attrs.length; i<l; i++ ) {
+					if ( attrs[i].specified ) {
+						return 0;
+					}
+				}
+				return 1;
+			}
+		}
+		return !node.attributes.length;
+	};
 }) (VEditor);
 /**
  * SOSO表情插件
@@ -9997,11 +10027,7 @@
 				cmd: function(){
 					_this.topWin.insertPhotoContent = null;
 					//业务参数
-					_this.config.panel.url = ([_this.config.baseURL,
-						'&blog_type=',_this.blogType,
-						'&uin=', _this.loginUin,
-						'&goLastAid='+goLastAid,
-						]).join('');
+					_this.config.panel.url = ([_this.config.baseURL,'&blog_type=',_this.blogType,'&uin=', _this.loginUin,'&goLastAid='+goLastAid]).join('');
 					goLastAid = 1;
 					_this.showPanel();
 				}

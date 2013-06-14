@@ -1,15 +1,19 @@
 /**
  * @fileOverview log记录文件
  */
- 
+
 var logCache = [];
- 
+
 /**
  * 记录log
- * 
+ *
  * @param {String} str log信息
  */
-function log(str) {
+function log() {
+	var str = '';
+	for(var i=0; i<arguments.length; i++){
+		str += arguments[i]+' ';
+	}
 	logCache.push(str + "\r\n");
 	if (!CONF.silent) {
 		print(str);

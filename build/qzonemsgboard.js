@@ -66,8 +66,9 @@
 			]
 		}
 	],
-	silent: true,
+	silent: false,
 	level: 0,
+	log: 'qzonemsgboard.log',
 	encode : 'utf-8',
 	comment: ' Qzone Project By Qzone Web Group. \n Copyright 1998 - 2008'
 }

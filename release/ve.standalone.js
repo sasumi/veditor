@@ -3,9 +3,6 @@
 		throw "VEDITOR NAMESPACE CONFLICT";
 	}
 
-	//设定发布目录，缺省为使用source
-	var VEDITOR_RELEASE_PATH = window.VEDITOR_RELEASE_PATH === undefined ? './../source/' : window.VEDITOR_RELEASE_PATH;
-
 	/**
 	 * window console方法容错
 	 * @deprecate 由于编辑器在开发过程中可能使用了console.log等此类的
@@ -17,46 +14,91 @@
 	}
 
 	/**
-	 * 编辑器主脚本路径
-	 * @deprecate 改方法仅判断页面上 script节点里面src包含ve.[*.]js的脚本路径
-	 * 因此如果页面上存在类似命名的脚本，将导致调用该变量的功能失效
+	 * 编辑器基础URL前缀作为veditor的相对路径，
+	 * 如调用主脚本的路径为：http://a.com/b/ve.js，则该相对路径为http://a.com/b/
 	 **/
-	var SCRIPT_SRC = (function(){
-		var scriptList = document.getElementsByTagName('script');
-		for (var i=0; i<scriptList.length; i++) {
-			var src = scriptList[i].src;
-			if (src && /ve\.(\w|\.)*js/.test(src)) {
-				return src;
+	var BASE_PATH = window.VE_BASE_PATH || (function(){
+		var isIE = !!window.attachEvent;
+
+		/**
+		 * 获取host前面部分
+		 * @param  {String} loc 非://word.com/格式不处理
+		 * @return {String}
+		 */
+		var getPreHost = function(loc){
+			loc = loc + '/';
+			if(!/(^\w+:\/\/[^\/]+\/)/.test(loc)){
+				return loc;
+			} else {
+				var tmp = /(^\w+:\/\/[^\/]+\/)/.exec(loc);
+				return tmp[1];
 			}
-		}
-		return null;
-	})();
+		};
 
-	/**
-	 * 编辑器基础URL前缀
-	 * 作为veditor的相对路径
-	 **/
-	var BASE_PATH = (function(){
-		if(!SCRIPT_SRC){
+		/**
+		 * 获取地址的path部分
+		 * 处理：http://a.com/b/c/d.html 返回 b/c
+		 * @param  {String} loc
+		 * @return {String}
+		 */
+		var getPrePath = function(loc){
+			return loc.replace(/^\w+:\/\/[^\/]+\//, '').replace(/[^\/]*$/, '').replace(/\/$/,'').replace(/^\//,'');
+		};
+
+		/**
+		 * 是否为绝对地址
+		 * @param  {String} loc
+		 * @return {Boolean}
+		 */
+		var isAbsLoc = function(loc){
+			return loc.substring(0, 1) == '/';
+		};
+
+		/**
+		 * 编辑器主脚本路径
+		 * @deprecate 改方法仅判断页面上 script节点里面src包含ve.[*.]js的脚本路径
+		 * 因此如果页面上存在类似命名的脚本，将导致调用该变量的功能失效
+		 **/
+		var SCRIPT_PATH = (function(){
+			var scriptList = document.getElementsByTagName('script');
+			for (var i=0; i<scriptList.length; i++) {
+				var src = scriptList[i].src;
+				if (src && /\/ve\.(\w|\.)*js/.test(src)) {
+					return src.replace(/[^\/]*$/, '');
+				}
+			}
+			return null;
+		})();
+
+		//页面指定了base路径
+		//返回 http://a.com 或 http://a.com/b/c 格式
+		var BASE_LOC = (function(){
+			var tmp = document.getElementsByTagName('BASE');
+			if(tmp && tmp.length && tmp[0].href){
+				var href = tmp[0].href;
+				href = href.indexOf('://') < 0 ? 'http://'+href : href;
+				return href.replace(/\/$/, '');
+			}
 			return '';
+		})();
+
+		//绝对路径形式调用，如：http://a.com/b/ve.js
+		//非IE会自动补全script的src，如 /a.js 补全为 http://a.com/a.js
+		if(!isIE || /:\/\//.test(SCRIPT_PATH)){
+			return SCRIPT_PATH;
 		}
 
-		var PATH_HOST = location.protocol + '//' +  location.hostname + (location.port ? ':'+location.port : '')+'/';
-		var scriptPath = SCRIPT_SRC.replace(/[^\/]*$/, '');
-
-		var forceDomain = '';
-		var tmp = document.getElementsByTagName('BASE');
-		if(tmp && tmp.length && tmp[0].href){
-			forceDomain = tmp[0].href.replace(/\/$/,'')+'/';
+		//绝对路径
+		if(isAbsLoc(SCRIPT_PATH)){
+			return getPreHost(BASE_LOC||location.href).replace(/\/$/,'') + SCRIPT_PATH;
 		}
-
-		if(/^(\.)*\//.test(scriptPath)){
-			return (forceDomain || PATH_HOST) +scriptPath.replace(/^\//, '')+VEDITOR_RELEASE_PATH;
-		} else {
-			return scriptPath+VEDITOR_RELEASE_PATH;
+		//相对路径
+		else {
+			return BASE_LOC ? BASE_LOC+'/'+SCRIPT_PATH : getPreHost(location.href)+getPrePath(location.href)+'./'+SCRIPT_PATH;
 		}
 	})();
 
+	//编辑器对象集合
 	var EDITOR_COLLECTIONS = {};
 
 	/**
@@ -71,7 +113,7 @@
 		},
 
 		plugin: {},
-		version: '2.02',
+		version: '2.03',
 		blankChar: '\uFEFF',
 		fillCharReg: new RegExp('\uFEFF', 'g'),
 		caretChar: '\u2009',
@@ -115,7 +157,7 @@
 			this.add(editor);
 
 			setTimeout(function(){
-				editor.init();
+			editor.init();
 			}, 100);
 
 			return editor;
@@ -123,6 +165,7 @@
 	};
 
 	//占用命名空间
+	//@deprecate 这里由于旧版的使用的命名空间为veEditor，所以暂时适配
 	window.veEditor = window.VEditor = VEditor;
 }) (window, document);
 (function(window, document, ve, undefined) {
@@ -3024,7 +3067,7 @@
 				placeholder: '',				//placeholder，仅检测文字命中部分，不对其他元素进行校验，
 												//也就是说，如果placeholder = '<div><b>text</b></div>'；那仅校验 text
 
-				language: 'cn',					//语言包
+				language: 'cn',					//语言包!该功能暂未启用
 				adapter: '',					//适配器
 				viewer: 'def',					//视图
 				editorCss: '',					//编辑器区域样式
@@ -3138,7 +3181,7 @@
 
 		/**
 		 * 启动插件
-		**/
+		 **/
 		_launchPlugins: function(){
 			var url = {}, ppc = [], matches, t = this,
 				pls = this.conf['plugins'],
@@ -3908,33 +3951,6 @@
 		 */
 		bindEditorDomEvent: function () {
 			var t = this, w = t.getWin(), d = t.getDoc(), b = t.getBody();
-			/**
-			 * 判断选区是否在父级元素的开始或选区开始本身为LI的开始（ie下startContainer会为li），包括以下几种情况
-			 * 1,前面没有兄弟元素
-			 * 2,前面的兄弟元素为不显示元素或空文本
-			 */
-			var isStartInParent = function(range){
-				var tmpRange = range.cloneRange(),
-					start = tmpRange.startContainer,
-					tmp;
-				if(tmpRange.startOffset == 0){
-					if(!tmpRange.startContainer.previousSibling ||tmpRange.startContainer.tagName == "LI"){
-						return true;
-					}else{
-						tmp = tmpRange.startContainer.previousSibling;
-						while(tmp){
-							if(!tmp.firstChild || ve.dom.getChildCount(tmp) == 0){
-								tmp = tmp.previousSibling;
-							}else{
-								return false;
-							}
-						}
-						return true;
-					}
-				}else{
-					return false;
-				}
-			};
 
 			//批量添加鼠标、键盘事件
 			ve.lang.each(['Click', 'KeyPress', 'KeyDown', 'KeyUp', 'MouseDown', 'MouseUp', 'Select', 'Paste'], function(_ev){
@@ -4035,7 +4051,7 @@
 									ve.dom.event.preventDefault(e);
 								}
 							}
-							
+
 							/**fix IE下删除列表除第一个LI外其他LI，跳出列表的问题
 							 * <ol>
 							 *	<li>aaaa</li>
@@ -4051,7 +4067,7 @@
 										currentLI = '';
 									}
 									//console.log(currentLI.innerHTML);
-									if(currentLI && currentLI.previousSibling && currentLI.previousSibling.tagName == 'LI'){ //非列表内第一个li	
+									if(currentLI && currentLI.previousSibling && currentLI.previousSibling.tagName == 'LI'){ //非列表内第一个li
 										rng.startContainer = currentLI.previousSibling;
 										rng.startOffset = currentLI.previousSibling.childNodes.length;
 										rng.collapse(true);
@@ -4281,8 +4297,9 @@
 			t.onKeyUp.addFirst(function(e){
 				if(e.keyCode != 16 && e.shiftKey){
 					//按着shift松开其他按键[方向键]这种情况不能更新range，否则会出现用户选择不全的情况
-				} else if(!e.ctrlKey && e.keyCode != 17){
-					//去除 ctrl+v等功能键冲突
+				}
+				//去除 ctrl+v，中文输入法冲突
+				else if(!e.ctrlKey && e.keyCode != 17 && e.keyCode != 229){
 					t.updateLastVERange();
 				}
 			});
@@ -4415,6 +4432,35 @@
 			});
 		}
 	});
+
+	/**
+	 * 判断选区是否在父级元素的开始或选区开始本身为LI的开始（ie下startContainer会为li），包括以下几种情况
+	 * 1,前面没有兄弟元素
+	 * 2,前面的兄弟元素为不显示元素或空文本
+	 * @param {Range} range
+	 * @return {Boolean}
+	 */
+	var isStartInParent = function(range){
+		var start = range.startContainer,
+			tmp;
+		if(range.startOffset == 0){
+			if(!range.startContainer.previousSibling ||range.startContainer.tagName == "LI"){
+				return true;
+			}else{
+				tmp = range.startContainer.previousSibling;
+				while(tmp){
+					if(!tmp.firstChild || ve.dom.getChildCount(tmp) == 0){
+						tmp = tmp.previousSibling;
+					}else{
+						return false;
+					}
+				}
+				return true;
+			}
+		}else{
+			return false;
+		}
+	};
 })(window, document, VEditor);
 /**
  * 编辑器核心命令集合

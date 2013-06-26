@@ -23,10 +23,11 @@ function log() {
 /**
  * 把最近一次log写入文件
  */
-function writeLog() {
+function writeLog(fileName) {
+	fileName = fileName || 'build.log';
 	if (CONF.silent) {
 		return
 	}
 	var _log = logCache.join("");
-	IO.saveFile(ENV.userDir + "/build.log", _log);
+	IO.saveFile(ENV.userDir + "/"+fileName, _log);
 }

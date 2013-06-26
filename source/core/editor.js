@@ -31,7 +31,7 @@
 				placeholder: '',				//placeholder，仅检测文字命中部分，不对其他元素进行校验，
 												//也就是说，如果placeholder = '<div><b>text</b></div>'；那仅校验 text
 
-				language: 'cn',					//语言包
+				language: 'cn',					//语言包!该功能暂未启用
 				adapter: '',					//适配器
 				viewer: 'def',					//视图
 				editorCss: '',					//编辑器区域样式
@@ -145,7 +145,7 @@
 
 		/**
 		 * 启动插件
-		**/
+		 **/
 		_launchPlugins: function(){
 			var url = {}, ppc = [], matches, t = this,
 				pls = this.conf['plugins'],
@@ -915,33 +915,6 @@
 		 */
 		bindEditorDomEvent: function () {
 			var t = this, w = t.getWin(), d = t.getDoc(), b = t.getBody();
-			/**
-			 * 判断选区是否在父级元素的开始或选区开始本身为LI的开始（ie下startContainer会为li），包括以下几种情况
-			 * 1,前面没有兄弟元素
-			 * 2,前面的兄弟元素为不显示元素或空文本
-			 */
-			var isStartInParent = function(range){
-				var tmpRange = range.cloneRange(),
-					start = tmpRange.startContainer,
-					tmp;
-				if(tmpRange.startOffset == 0){
-					if(!tmpRange.startContainer.previousSibling ||tmpRange.startContainer.tagName == "LI"){
-						return true;
-					}else{
-						tmp = tmpRange.startContainer.previousSibling;
-						while(tmp){
-							if(!tmp.firstChild || ve.dom.getChildCount(tmp) == 0){
-								tmp = tmp.previousSibling;
-							}else{
-								return false;
-							}
-						}
-						return true;
-					}
-				}else{
-					return false;
-				}
-			};
 
 			//批量添加鼠标、键盘事件
 			ve.lang.each(['Click', 'KeyPress', 'KeyDown', 'KeyUp', 'MouseDown', 'MouseUp', 'Select', 'Paste'], function(_ev){
@@ -1042,7 +1015,7 @@
 									ve.dom.event.preventDefault(e);
 								}
 							}
-							
+
 							/**fix IE下删除列表除第一个LI外其他LI，跳出列表的问题
 							 * <ol>
 							 *	<li>aaaa</li>
@@ -1058,7 +1031,7 @@
 										currentLI = '';
 									}
 									//console.log(currentLI.innerHTML);
-									if(currentLI && currentLI.previousSibling && currentLI.previousSibling.tagName == 'LI'){ //非列表内第一个li	
+									if(currentLI && currentLI.previousSibling && currentLI.previousSibling.tagName == 'LI'){ //非列表内第一个li
 										rng.startContainer = currentLI.previousSibling;
 										rng.startOffset = currentLI.previousSibling.childNodes.length;
 										rng.collapse(true);
@@ -1288,8 +1261,9 @@
 			t.onKeyUp.addFirst(function(e){
 				if(e.keyCode != 16 && e.shiftKey){
 					//按着shift松开其他按键[方向键]这种情况不能更新range，否则会出现用户选择不全的情况
-				} else if(!e.ctrlKey && e.keyCode != 17){
-					//去除 ctrl+v等功能键冲突
+				}
+				//去除 ctrl+v，中文输入法冲突
+				else if(!e.ctrlKey && e.keyCode != 17 && e.keyCode != 229){
 					t.updateLastVERange();
 				}
 			});
@@ -1422,4 +1396,33 @@
 			});
 		}
 	});
+
+	/**
+	 * 判断选区是否在父级元素的开始或选区开始本身为LI的开始（ie下startContainer会为li），包括以下几种情况
+	 * 1,前面没有兄弟元素
+	 * 2,前面的兄弟元素为不显示元素或空文本
+	 * @param {Range} range
+	 * @return {Boolean}
+	 */
+	var isStartInParent = function(range){
+		var start = range.startContainer,
+			tmp;
+		if(range.startOffset == 0){
+			if(!range.startContainer.previousSibling ||range.startContainer.tagName == "LI"){
+				return true;
+			}else{
+				tmp = range.startContainer.previousSibling;
+				while(tmp){
+					if(!tmp.firstChild || ve.dom.getChildCount(tmp) == 0){
+						tmp = tmp.previousSibling;
+					}else{
+						return false;
+					}
+				}
+				return true;
+			}
+		}else{
+			return false;
+		}
+	};
 })(window, document, VEditor);

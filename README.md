@@ -1,4 +1,4 @@
 veditor
 =======
 
-qzone veditor
+qzone online web editor.

@@ -15,7 +15,6 @@
 				//辅助类库独立防止，主要是可以用于接入适配器
 				//例如这里有适配器的话，仅需要调用适配器脚本
 				'../source/core/helper/lang.js',
-
 				'../source/adapter/qzfl.adapter.js',
 
 				//下面的3个文件跟QZFL.adapter.js是互斥的
@@ -86,6 +85,7 @@
 		}
 	],
 	silent: false,
+	log: 'qzoneblog.log',
 	level: 0,
 	encode : 'utf-8',
 	comment: ' Qzone Project By Qzone Web Group. \n Copyright 1998 - 2008'

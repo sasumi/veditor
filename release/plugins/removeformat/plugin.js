@@ -9,7 +9,6 @@
 	ve.lang.Class('VEditor.plugin.RemoveFormat', {
 		editor : null,
 		curToolbarMode : 'default',
-		button : null,
 		init: function ( editor, url ) {
 
 			var _this = this;
@@ -17,7 +16,7 @@
 			editor.addCommand('removeformat', function(){
 				_this.removeFormat();
 			});
-			var btn = editor.toolbarManager.createButton('removeformat', {
+			editor.toolbarManager.createButton('removeformat', {
 				'class': 'veRemoveFormat',
 				title: '清除格式',
 				text: '',
@@ -31,14 +30,24 @@
 			bookmark = veRange.createBookmark();
 			node = bookmark.start;
 			
-			//切开始部分
+			/**
+			 * 切开始部分
+			 * <div>xxx<span>xxxx|xx</span>xxx</div>
+			 * 在最近的块元素下切开
+			 * <div>xxx<span>xxxx</span>|<span>xx</span></div>
+			 */
 			while(( parent = node.parentNode ) && !ve.dom.isBlock( parent )){
 				veRange.breakParent( node,parent );
 				clearEmptySibling( node );
 			}
 			
 			if( bookmark.end ){
-				//切结束部分
+				/**
+				 * 切结束部分
+				 * <div>xxx<span>xxxx|xx</span>xxx</div>
+				 * 在最近的块元素下切开
+				 * <div>xxx<span>xxxx</span>|<span>xx</span></div>
+				 */
 				node = bookmark.end;
 				
 				while(( parent = node.parentNode ) && !ve.dom.isBlock( parent )){
@@ -53,7 +62,8 @@
 					if ( current == bookmark.end ) {
 						break;
 					}
-					next = ve.dom.getNextDomNode( current, true, filter );
+					next = ve.dom.getNextDomNode( current, true, filter ); //true表示从当前节点的第一个子节点开始找符合条件的节点,false的话从当前节点的下一个节点开始判断
+					//ve.dtd.$empty : area:1,base:1,br:1,col:1,hr:1,img:1,input:1,link:1,meta:1,param:1,embed:1,wbr:1
 					if ( !ve.dtd.$empty[current.tagName.toUpperCase()] && !veRange.isBookmarkNode( current ) ) {
 						if ( REMOVE_TAG_REG.test( current.tagName.toUpperCase() ) ) {
 							ve.dom.remove( current, true );
@@ -115,6 +125,21 @@
 	var filter = function( node ) {
 		return node.nodeType == 1;
 	};
+	
+	/**
+	 * @parame next下一个将要删除的元素，当前元素的上一个或者下一个兄弟节点
+	 * @parame dir 指定删除前兄弟节点还是后兄弟节点'nextSibling' or 'previousSibling'
+	 */
+	var clear = function(next, dir) {
+		var tmpNode;
+		//该节点不是添加的书签，不是列表元素，或者是制表符换行辅助符号
+		while (next && !isBookmarkNode(next) && (isEmptyInlineElement(next)
+			|| new RegExp('[\t\n\r' + ve.caretChar + ']').test(next.nodeValue) )) {
+			tmpNode = next[dir];
+			ve.dom.remove(next);
+			next = tmpNode;
+		}
+	};
 	/**
 	 * 清除node节点左右兄弟为空的inline节点
 	 * @name clearEmptySibling
@@ -125,16 +150,6 @@
 	 * <b></b><i></i>xxxx<b>bb</b> --> xxxx<b>bb</b>
 	 */
 	var	clearEmptySibling = function (node, ignoreNext, ignorePre) {
-		function clear(next, dir) {
-			var tmpNode;
-			while (next && !isBookmarkNode(next) && (isEmptyInlineElement(next)
-				//这里不能把空格算进来会吧空格干掉，出现文字间的空格丢掉了
-				|| !new RegExp('[^\t\n\r' + ve.caretChar + ']').test(next.nodeValue) )) {
-				tmpNode = next[dir];
-				ve.dom.remove(next);
-				next = tmpNode;
-			}
-		}
 		!ignoreNext && clear(node.nextSibling, 'nextSibling');
 		!ignorePre && clear(node.previousSibling, 'previousSibling');
 	};
@@ -185,31 +200,31 @@
 	/**
 	 * 检查节点node是否是空inline节点
 	 * @name  isEmptyInlineElement
-	 * @grammar   isEmptyInlineElement(node)  => 1|0
+	 * @grammar   isEmptyInlineElement(node)  => true|false
 	 * @example
-	 * <b><i></i></b> => 1
-	 * <b><i></i><u></u></b> => 1
-	 * <b></b> => 1
-	 * <b>xx<i></i></b> => 0
+	 * <b><i></i></b> => true
+	 * <b><i></i><u></u></b> => true
+	 * <b></b> => true
+	 * <b>xx<i></i></b> => false
 	 */
 	var	isEmptyInlineElement = function ( node ) {
 		if (node.nodeType != 1 || ve.dtd.$removeEmpty[ node.tagName.toUpperCase() ]) {
-			return 0;
+			return false;
 		}
 		node = node.firstChild;
 		while (node) {
 			//如果是创建的bookmark就跳过
 			if (isBookmarkNode(node)) {
-				return 0;
+				return false;
 			}
 			if (node.nodeType == 1 && !isEmptyInlineElement(node) ||
 				node.nodeType == 3 && !isWhitespace(node)
 				) {
-				return 0;
+				return false;
 			}
 			node = node.nextSibling;
 		}
-		return 1;
+		return true;
 	};
 	/**
 	 * 检测节点node是否为空节点（包括空格、换行、占位符等字符）
@@ -233,19 +248,19 @@
 	 */
 	var	isRedundantSpan = function( node ) {
 		if (node.nodeType == 3 || node.tagName.toUpperCase() != 'SPAN'){
-			return 0;
+			return false;
 		}
 		if (ve.ua.ie) {
-			//ie 下判断实效，所以只能简单用style来判断
+			//ie 下判断失效，所以只能简单用style来判断
 			//return node.style.cssText == '' ? 1 : 0;
 			var attrs = node.attributes;
 			if ( attrs.length ) {
 				for ( var i = 0,l = attrs.length; i<l; i++ ) {
 					if ( attrs[i].specified ) {
-						return 0;
+						return false;
 					}
 				}
-				return 1;
+				return true;
 			}
 		}
 		return !node.attributes.length;

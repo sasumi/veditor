@@ -86,8 +86,7 @@ function copyAll(targetDir, fromDir, files){
 			if(/\/$/.test(tag)){
 				f.mkdirs();														log("\r\nMD:\r\n", tag);
 			} else {
-				var content = IO.readFile(source);								log("\r\nCC:");log("  SRC:"+source);log("  TAG:"+tag);
-				IO.saveFile(tag, content);
+				IO.copyFile(source, tag);										log("\r\nCC:");log("  SRC:"+source);log("  TAG:"+tag);
 			}
 		}
 	}
